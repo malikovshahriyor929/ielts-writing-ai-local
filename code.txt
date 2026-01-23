@@ -1,0 +1,40 @@
+python ielts_checker.py \
+  --task 2 \
+  --prompt "Some people think that the increasing use of computers and mobile phones for communication has a negative effect on young people's reading and writing skills.
+To what extent do you agree or disagree?" \
+  --essay_file essay.txt \
+  --max_new_tokens 650 \
+  --temperature 0.2
+
+____________________ pro2checker ____________________
+essay7.txt
+python3 checker.py \
+  --task 2 \
+  --prompt "Some people think that the increasing use of computers and mobile phones for communication has a negative effect on young people's reading and writing skills.
+To what extent do you agree or disagree?" \
+  --essay_file essay.txt \
+  --max_new_tokens 650 \
+  --temperature 0.0 \
+  --quality balanced
+
+
+essay7.5.txt
+python3 checker.py \
+  --task 2 \
+  --prompt "In some countries young people have little leisure time and are under a lot of pressure to work hard on their studies.
+What do you think are the causes of this?
+What solutions can you suggest?" \
+  --essay_file essay.txt \
+  --max_new_tokens 650 \
+  --temperature 0.0 \
+  --quality balanced
+
+essay9.txt
+python3 pro2checker.py \
+  --task 2 \
+  --prompt "Some people think that parents should teach their children how to be good members of society. Others, however, believe that school is the best place to learn this. Discuss both views and give your own opinion." \
+  --essay_file essay9.txt \
+  --max_new_tokens 650 \
+  --temperature 0.0 \
+  --quality balanced
+

@@ -1,0 +1,71 @@
+q
+qw
+ecat > checker.py <<'PY'
+import argparse
+import json
+from transformers import pipeline
+
+DEFAULT_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
+
+RUBRIC = """
+You are an IELTS Writing Task 2 examiner.
+
+Score these 4 criteria from 0 to 9 (half bands allowed):
+- Task Response (TR)
+- Coherence and Cohesion (CC)
+- Lexical Resource (LR)
+- Grammatical Range and Accuracy (GRA)
+
+Then compute Overall as the average rounded to the nearest 0.5 band.
+
+Return STRICT JSON with keys:
+TR, CC, LR, GRA, Overall, Feedback, Improvements
+
+Where:
+- Feedback is an object with keys TR, CC, LR, GRA (each: short paragraph).
+- Improvements is a list of 6 specific actionable edits.
+Do not include any text outside JSON.
+"""
+
+def build_prompt(task_prompt: str, essay: str) -> str:
+    return f"Task 2 Question:\n{task_prompt}\n\nEssay:\n{essay}\n\n{RUBRIC}\nJSON:"
+
+def extract_json(text: str) -> dict:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise RuntimeError("Model did not output JSON.\n---RAW OUTPUT---\n" + text[-1200:])
+    return json.loads(text[start:end+1])
+
+def main():
+    ap = argparse.ArgumentParser(description="IELTS Writing Task 2 checker (LLM-based).")
+    ap.add_argument("--model", default=DEFAULT_MODEL, help="HF model id (default: Mistral 7B Instruct)")
+    ap.add_argument("--prompt", required=True, help="Task 2 prompt/question")
+    ap.add_argument("--essay_file", required=True, help="Path to a .txt file containing the essay")
+    ap.add_argument("--max_new_tokens", type=int, default=650)
+    ap.add_argument("--temperature", type=float, default=0.2)
+    args = ap.parse_args()
+
+    with open(args.essay_file, "r", encoding="utf-8") as f:
+        essay = f.read().strip()
+
+    gen = pipeline(
+        "text-generation",
+        model=args.model,
+        device_map="auto",
+    )
+
+    full_prompt = build_prompt(args.prompt, essay)
+    out = gen(full_prompt, max_new_tokens=args.max_new_tokens, temperature=args.temperature)[0]["generated_text"]
+
+    result = extract_json(out)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
+PY
+X
+
+
+
+≈≈≈≈
