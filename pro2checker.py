@@ -62,20 +62,28 @@ TASK1_JSON_TEMPLATE = """{
 # 2) Rubrics (based on official "public version" band descriptors)
 #    We DO NOT paste the whole descriptors table; we summarize rules & criteria names.
 # -----------------------------
+SYSTEM_PROMPT = "You are an IELTS Writing examiner. Be accurate and consistent with band descriptors."
+
+
 RUBRIC_COMMON = f"""
-You are a STRICT IELTS Writing examiner. Use the official IELTS Writing band descriptors (public version).
+You are a STRICT IELTS Writing examiner being real examiner. Use the official IELTS Writing band descriptors (public/public-facing version).
+
 Rules:
 - Scores are 0–9 (half bands allowed: 0, 0.5, 1, 1.5 ... 9).
+- Band 0 MUST be used ONLY if the response is blank OR has no assessable language.
+  If there is a meaningful attempt in English, the minimum is 1.0.
 - Return ONE single JSON object only (no Markdown, no extra text).
 - Start output with '{{' as the first character. No text before it.
 - End output with '}}' then append the literal token {END_TOKEN}.
 - Numbers MUST be numbers (not strings).
 - "Improvements" MUST be exactly 6 items (strings).
-- Keep feedback concise but specific to THIS essay.
+- Feedback must reference THIS essay (quote at least 1 short phrase per criterion).
 
 Important:
-- If you are unsure, make the best justified estimate; do not refuse.
+- Do NOT give the same score for TR, CC, LR, and GRA unless you are absolutely sure they are equal.
+  If you still give identical scores, you must justify it clearly in Feedback.
 """
+
 
 RUBRIC_TASK2 = """
 Task type: IELTS Writing Task 2.
@@ -141,10 +149,10 @@ Fill and return ONLY this JSON template (keys/order should stay the same):
 def candidate_models(task: int, quality: str) -> List[str]:
     """
     You can always override with --model.
-    quality: fast | balanced | best
+    quality: fast | balanced | best | myfast
     """
     quality = quality.lower().strip()
-    if quality not in {"fast", "balanced", "best"}:
+    if quality not in {"fast", "balanced", "best", "myfast"}:
         quality = "balanced"
 
     # NOTE:
@@ -163,6 +171,10 @@ def candidate_models(task: int, quality: str) -> List[str]:
                 "Qwen/Qwen2.5-3B-Instruct",
                 "Qwen/Qwen2.5-1.5B-Instruct",
             ]
+        if quality == "myfast":
+            return [
+                 "chillies/mistral-7b-ielts-evaluator-q4",
+            ]
         return ["Qwen/Qwen2.5-1.5B-Instruct"]
     else:
         # Task 1
@@ -178,6 +190,36 @@ def candidate_models(task: int, quality: str) -> List[str]:
                 "Qwen/Qwen2.5-1.5B-Instruct",
             ]
         return ["Qwen/Qwen2.5-1.5B-Instruct"]
+
+def maybe_chat_wrap(tokenizer: Any, user_prompt: str) -> str:
+    if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    # fallback (no chat template)
+    return f"SYSTEM: {SYSTEM_PROMPT}\n\nUSER:\n{user_prompt}"
+
+def scores_are_uniform(d: Dict[str, Any], keys: List[str]) -> bool:
+    vals = []
+    for k in keys:
+        try:
+            vals.append(float(d.get(k, 0)))
+        except Exception:
+            vals.append(0.0)
+    vals = [round_half(v) for v in vals]
+    return len(set(vals)) == 1
+
+def build_rescore_prompt(original_prompt: str) -> str:
+    return (
+        original_prompt
+        + "\n\nIMPORTANT: Your previous scoring gave the same band for all criteria (e.g., TR=CC=LR=GRA). "
+          "This is usually incorrect. Re-evaluate each criterion independently. "
+          "TR, CC, LR, and GRA may differ. Quote at least one short phrase from the essay in each Feedback field.\n"
+          f"Return JSON only and end with {END_TOKEN}.\n"
+    )
 
 
 # -----------------------------
@@ -205,25 +247,24 @@ def build_prompt(task: int, task1_mode: str, task_prompt: str, essay: str) -> Tu
 
     # Force '{' right after "JSON:" to reduce "missing {" issues
     full = (
-        f"Task Question:\n{task_prompt.strip()}\n\n"
-        f"Candidate Answer (word_count={wc}):\n{essay.strip()}\n\n"
-        f"{RUBRIC_COMMON}\n"
-        f"{rubric}\n"
-        f"JSON (end with {END_TOKEN}):\n"  # newline
-        f"{{"
-    )
+    f"Task Question:\n{task_prompt.strip()}\n\n"
+    f"Candidate Answer (word_count={wc}):\n{essay.strip()}\n\n"
+    f"{RUBRIC_COMMON}\n"
+    f"{rubric}\n"
+    f"JSON (end with {END_TOKEN}):\n"
+)
     return full, template
 
 
-def maybe_chat_wrap(tokenizer: Any, user_prompt: str) -> str:
-    """
-    If tokenizer has chat_template (Qwen/Llama/etc.), use it.
-    Otherwise return plain prompt.
-    """
-    if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
-        messages = [{"role": "user", "content": user_prompt}]
-        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    return user_prompt
+# def maybe_chat_wrap(tokenizer: Any, user_prompt: str) -> str:
+#     """
+#     If tokenizer has chat_template (Qwen/Llama/etc.), use it.
+#     Otherwise return plain prompt.
+#     """
+#     if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
+#         messages = [{"role": "user", "content": user_prompt}]
+#         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+#     return user_prompt
 
 
 # -----------------------------
@@ -239,38 +280,72 @@ def pick_runtime_device(requested: str) -> str:
         return "mps"
     return "cpu"
 
+GGUF_MAP = {
+    "chillies/mistral-7b-ielts-evaluator-q4": "GUFF-ielts-fighter-unsloth.Q4_K_M.gguf",
+}
 
-def load_model(model_id: str, device: str) -> Tuple[Any, Any]:
-    """
-    Load tokenizer + model safely for cpu/mps/cuda.
-    dtype uses new parameter name "dtype".
-    """
-    tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+def load_model(model_id: str, device: str):
+    gguf_file = GGUF_MAP.get(model_id)
+
+    tok = AutoTokenizer.from_pretrained(
+        model_id,
+        use_fast=True,
+        gguf_file=gguf_file,   # <- MUHIM
+    )
 
     if device == "cuda":
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             device_map="auto",
-            dtype="auto",
+            gguf_file=gguf_file,  # <- MUHIM
         )
     elif device == "mps":
-        # MPS usually prefers float16
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             device_map=None,
-            dtype=torch.float16,
-        )
-        model.to("mps")
+            gguf_file=gguf_file,
+        ).to("mps")
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             device_map=None,
-            dtype="auto",
-        )
-        model.to("cpu")
+            gguf_file=gguf_file,
+        ).to("cpu")
 
     model.eval()
     return tok, model
+
+# def load_model(model_id: str, device: str) -> Tuple[Any, Any]:
+#     """
+#     Load tokenizer + model safely for cpu/mps/cuda.
+#     dtype uses new parameter name "dtype".
+#     """
+#     tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+
+#     if device == "cuda":
+#         model = AutoModelForCausalLM.from_pretrained(
+#             model_id,
+#             device_map="auto",
+#             dtype="auto",
+#         )
+#     elif device == "mps":
+#         # MPS usually prefers float16
+#         model = AutoModelForCausalLM.from_pretrained(
+#             model_id,
+#             device_map=None,
+#             dtype=torch.float16,
+#         )
+#         model.to("mps")
+#     else:
+#         model = AutoModelForCausalLM.from_pretrained(
+#             model_id,
+#             device_map=None,
+#             dtype="auto",
+#         )
+#         model.to("cpu")
+
+#     model.eval()
+#     return tok, model
 
 
 def infer_input_device(model: Any) -> torch.device:
@@ -452,7 +527,7 @@ def extract_json(raw: str) -> Dict[str, Any]:
 # 7) Validate / normalize output
 # -----------------------------
 def round_half(x: float) -> float:
-    return round(x * 2) / 2
+    return math.floor(x * 2 + 0.5) / 2.0
 
 
 def clamp_band(x: float) -> float:
@@ -575,7 +650,7 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument(
         "--quality",
-        choices=["fast", "balanced", "best"],
+        choices=["fast", "balanced", "best", "myfast"],
         default="balanced",
         help="Auto-model quality tier (used only if --model not provided)",
     )
@@ -617,11 +692,32 @@ def main():
         print(f"\n[DEBUG] model={model_id_used} device={device}\n---RAW START---\n{raw}\n---RAW END---\n", file=sys.stderr)
 
     # Cut at END_TOKEN, but keep repair robustness
+    # cut = raw.split(END_TOKEN, 1)[0]
+    # parsed = extract_json(cut)
+    # normalized = normalize_result(args.task, args.task1_mode, essay, parsed)
+
+    # print(json.dumps(normalized, indent=2, ensure_ascii=False))
     cut = raw.split(END_TOKEN, 1)[0]
     parsed = extract_json(cut)
     normalized = normalize_result(args.task, args.task1_mode, essay, parsed)
 
+    # If model lazily outputs same score for all criteria, do a second pass
+    if args.task == 2 and scores_are_uniform(normalized, ["TR", "CC", "LR", "GRA"]):
+        rescore_prompt = build_rescore_prompt(full_prompt)
+        formatted_prompt2 = maybe_chat_wrap(tok, rescore_prompt)
+        raw2 = generate_text(
+            tokenizer=tok,
+            model=model,
+            prompt=formatted_prompt2,
+            max_new_tokens=min(450, args.max_new_tokens),
+            temperature=args.temperature,
+        )
+        cut2 = raw2.split(END_TOKEN, 1)[0]
+        parsed2 = extract_json(cut2)
+        normalized = normalize_result(args.task, args.task1_mode, essay, parsed2)
+
     print(json.dumps(normalized, indent=2, ensure_ascii=False))
+
 
 
 if __name__ == "__main__":

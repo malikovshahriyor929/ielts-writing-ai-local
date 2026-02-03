@@ -6,7 +6,29 @@ To what extent do you agree or disagree?" \
   --max_new_tokens 650 \
   --temperature 0.2
 
+essay92.txt
+python3 prochecker.py \
+  --task 2 \
+  --prompt "In many professional sports, there is an increase in the number of athletes using banned substances to improve their performance.
+What are the causes of the phenomenon and what are some of the possible solutions?" \
+  --essay_file essay7.5.txt \
+  --max_new_tokens 850 \
+  --temperature 0.0
+
+
+
 ____________________ pro2checker ____________________
+
+python3 pro2checker.py \
+  --task 2 \
+  --quality balanced \
+  --device cpu \
+  --max_new_tokens 450 \
+  --temperature 0.0 \
+  --prompt "In many professional sports, there is an increase in the number of athletes using banned substances to improve their performance.
+What are the causes of the phenomenon and what are some of the possible solutions?" \
+  --essay_file essay7.5.txt
+
 essay7.txt
 python3 checker.py \
   --task 2 \
@@ -38,3 +60,34 @@ python3 pro2checker.py \
   --temperature 0.0 \
   --quality balanced
 
+python3 pro2checker.py \
+  --task 2 \
+  --prompt "Some people think that parents should teach their children how to be good members of society. Others, however, believe that school is the best place to learn this. Discuss both views and give your own opinion." \
+  --essay_file essay9.txt  \
+  --max_new_tokens 650 \
+  --temperature 0.0 \
+  --quality fast
+
+
+
+
+
+
+  codex kinda real 
+  python3 codexchecker.py \
+  --task 2 \
+  --prompt "In many professional sports, there is an increase in the number of athletes using banned substances to improve their performance.
+What are the causes of the phenomenon and what are some of the possible solutions?" \
+  --essay_file essay7.5.txt \
+  --max_new_tokens 350 \
+  --temperature 0.0 \
+  --gguf_file GUFF-ielts-fighter-unsloth.Q4_K_M.gguf
+
+
+  python3 codexchecker.py \
+  --task 2 \
+  --prompt "Some people think that parents should teach their children how to be good members of society. Others, however, believe that school is the best place to learn this. Discuss both views and give your own opinion." \
+  --essay_file essay9.txt  \
+ --max_new_tokens 650 \
+  --temperature 0.0 \
+  --gguf_file GUFF-ielts-fighter-unsloth.Q4_K_M.gguf
